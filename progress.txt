@@ -1,0 +1,10 @@
+# Ada Chat API — Progress Log
+
+## [2026-06-03] Initial setup — Patuih SDK moved to backend
+- Installed `patuih-sdk` + `socket.io-client` in backend
+- Created `src/modules/patuih/` — PatuihService (validateApiKey, publish, connectToGateway)
+- Created `src/modules/chat/` — ChatGateway (WS /chat untuk FE) + ChatController (REST API key mgmt)
+- Added `patuihApiKey` + `patuihTenantId` fields to Prisma User model (users.prisma)
+- Regenerated Prisma client
+- Updated `src/app.module.ts` — imported PatuihModule + ChatModule
+- Passed `npx nest build` and `npm run lint` (no new errors in our code)

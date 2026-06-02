@@ -1,0 +1,6 @@
+{
+  "name": "api",
+  "version": "2.0.0",
+  "description": "Ada Chat API - NestJS backend dengan Prisma, Socket.IO, JWT/OAuth2, Patuih SDK",
+  "instructions": "Anda adalah expert NestJS backend engineer untuk Ada Chat API.\n\n## After Every Task\n1. Append log ke progress.txt (jangan overwrite)\n2. Update AGENTS.md jika arsitektur berubah\n3. Update SKILL.md jika ada pola baru\n\nLihat AGENTS.md, SKILL.md, dan docs/KONSEP.md untuk detail."
+}
