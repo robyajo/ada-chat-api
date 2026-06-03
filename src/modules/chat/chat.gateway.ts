@@ -21,7 +21,14 @@ interface AuthenticatedSocket extends Socket {
 }
 
 @WebSocketGateway({
-  cors: { origin: '*', credentials: true },
+  cors: {
+    origin: [
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      process.env.CLIENT_URL,
+    ].filter(Boolean) as string[],
+    credentials: true,
+  },
   namespace: '/chat',
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -41,12 +48,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleConnection(client: AuthenticatedSocket) {
     const userId = client.handshake.auth?.userId as string | undefined;
     const username = client.handshake.auth?.username as string | undefined;
-    const tenantId = client.handshake.auth?.tenantId as string | undefined;
+    let tenantId = client.handshake.auth?.tenantId as string | undefined;
 
-    if (!userId || !tenantId) {
-      client.emit('error', 'Authentication required: userId and tenantId');
+    if (!userId) {
+      client.emit('error', 'Authentication required: userId');
       client.disconnect();
       return;
+    }
+
+    const systemTenantId = process.env.PATUIH_SYSTEM_TENANT_ID || 'cmpxddhhl00fwv0dglc8uw6jx';
+    if (!tenantId || tenantId === 'system' || tenantId === 'null' || tenantId === 'undefined') {
+      tenantId = systemTenantId;
     }
 
     client.userId = userId;
@@ -55,11 +67,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     ChatGateway.onlineUsers.set(userId, client.username);
 
-    this.patuihService.connectToGateway(tenantId);
+    // Connect to the system gateway
+    this.patuihService.connectToGateway(systemTenantId);
 
     // Auto join private notification room and global presence channel
     void client.join(`user_${userId}`);
-    void client.join(`presence_${tenantId}`);
+    void client.join(`presence_${systemTenantId}`);
 
     const cleanupUserEvents = this.chatService.onPatuihEvent(
       `user_${userId}`,
@@ -69,7 +82,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
 
     const cleanupPresenceEvents = this.chatService.onPatuihEvent(
-      `presence_${tenantId}`,
+      `presence_${systemTenantId}`,
       (payload: WsEventPayload) => {
         client.emit('presence', payload);
       },
@@ -77,11 +90,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     (client as any).cleanupFns = [cleanupUserEvents, cleanupPresenceEvents];
 
-    // Notify other users online
-    void this.chatService.publishEvent(userId, `presence_${tenantId}`, 'presence.online', {
-      userId,
-      username: client.username,
-    }).catch(() => {});
+    // Notify other users online on the system channel
+    void this.chatService
+      .publishEvent(`presence_${systemTenantId}`, 'presence.online', {
+        userId,
+        username: client.username,
+      })
+      .catch(() => {});
 
     this.logger.log(`Client connected: ${userId} (${client.username})`);
   }
@@ -90,12 +105,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (client.userId) {
       ChatGateway.onlineUsers.delete(client.userId);
 
-      if (client.tenantId) {
-        void this.chatService.publishEvent(client.userId, `presence_${client.tenantId}`, 'presence.offline', {
-          userId: client.userId,
-          username: client.username,
-        }).catch(() => {});
-      }
+      const systemTenantId = process.env.PATUIH_SYSTEM_TENANT_ID || 'cmpxddhhl00fwv0dglc8uw6jx';
+      void this.chatService
+        .publishEvent(
+          `presence_${systemTenantId}`,
+          'presence.offline',
+          {
+            userId: client.userId,
+            username: client.username,
+          },
+        )
+        .catch(() => {});
     }
 
     // Cleanup personal / presence listeners
@@ -138,7 +158,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const userId = client.userId!;
 
     void this.chatService
-      .publishEvent(userId, roomId, 'chat.join', {
+      .publishEvent(roomId, 'chat.join', {
         username: client.username,
       })
       .catch((err: Error) => {
@@ -170,7 +190,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
-      await this.chatService.publishMessage(userId, roomId, data);
+      await this.chatService.publishMessage(roomId, data);
     } catch (err) {
       this.logger.error(`Failed to send message: ${err}`);
       client.emit('error', 'Failed to send message');
@@ -188,7 +208,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!roomId || !userId) return;
 
     try {
-      await this.chatService.publishEvent(userId, roomId, 'chat.typing', {
+      await this.chatService.publishEvent(roomId, 'chat.typing', {
         username: client.username,
         isTyping: data.isTyping,
       });
@@ -209,7 +229,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (roomId && userId) {
       try {
-        await this.chatService.publishEvent(userId, roomId, 'chat.leave', {
+        await this.chatService.publishEvent(roomId, 'chat.leave', {
           username: client.username,
         });
       } catch {

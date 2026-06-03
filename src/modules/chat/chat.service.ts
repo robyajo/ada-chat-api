@@ -2,7 +2,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  BadRequestException,
   ForbiddenException,
   ConflictException,
 } from '@nestjs/common';
@@ -21,92 +20,24 @@ export class ChatService {
     private eventEmitter: EventEmitter2,
   ) {}
 
-  async savePatuihKey(
-    userId: string,
-    apiKey: string,
-  ): Promise<{ tenantId: string; message: string }> {
-    const result = await this.patuihService.validateApiKey(apiKey);
-    const tenantId = result.tenantId;
-
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { patuihApiKey: apiKey, patuihTenantId: tenantId },
-    });
-
-    this.patuihService.connectToGateway(tenantId);
-
-    this.logger.log(
-      `User ${userId} saved Patuih API key (tenant: ${tenantId})`,
-    );
-    return { tenantId, message: 'Patuih API key saved successfully' };
-  }
-
-  async getPatuihKeyStatus(userId: string): Promise<{
-    hasKey: boolean;
-    tenantId: string | null;
-  }> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-    return {
-      hasKey: !!user.patuihApiKey,
-      tenantId: user.patuihTenantId,
-    };
-  }
-
-  async removePatuihKey(userId: string): Promise<{ message: string }> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    if (user.patuihTenantId) {
-      this.patuihService.disconnectFromGateway(user.patuihTenantId);
-    }
-
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { patuihApiKey: null, patuihTenantId: null },
-    });
-
-    return { message: 'Patuih API key removed' };
-  }
-
   async publishMessage(
-    userId: string,
     roomId: string,
     data: { text: string; id: string; sender: string; timestamp: string },
   ): Promise<void> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.patuihApiKey) {
-      throw new BadRequestException('Patuih API key not configured');
-    }
-
-    return this.patuihService.publish(
-      user.patuihApiKey,
-      roomId,
-      'chat.message',
-      {
-        text: data.text,
-        sender: data.sender,
-        id: data.id,
-        timestamp: data.timestamp,
-      },
-    );
+    return this.patuihService.publish(roomId, 'chat.message', {
+      text: data.text,
+      sender: data.sender,
+      id: data.id,
+      timestamp: data.timestamp,
+    });
   }
 
   async publishEvent(
-    userId: string,
     roomId: string,
     event: string,
     data: Record<string, unknown>,
   ): Promise<void> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.patuihApiKey) {
-      throw new BadRequestException('Patuih API key not configured');
-    }
-
-    return this.patuihService.publish(user.patuihApiKey, roomId, event, data);
+    return this.patuihService.publish(roomId, event, data);
   }
 
   onPatuihEvent(
@@ -204,7 +135,6 @@ export class ChatService {
       },
     });
     if (!room) throw new NotFoundException('Room not found');
-
     const isMember = room.members.some((m) => m.userId === userId);
     if (!isMember) throw new ForbiddenException('Not a member of this room');
 
@@ -232,12 +162,7 @@ export class ChatService {
     const room = await this.prisma.room.findUnique({ where: { id } });
     if (!room) throw new NotFoundException('Room not found');
     if (room.ownerId !== userId) throw new ForbiddenException('Only the room owner can update the room');
-
-    await this.prisma.room.update({
-      where: { id },
-      data: { ...dto },
-    });
-
+    await this.prisma.room.update({ where: { id }, data: { ...dto } });
     return { message: 'Room updated successfully' };
   }
 
@@ -245,64 +170,43 @@ export class ChatService {
     const room = await this.prisma.room.findUnique({ where: { id } });
     if (!room) throw new NotFoundException('Room not found');
     if (room.ownerId !== userId) throw new ForbiddenException('Only the room owner can delete the room');
-
     await this.prisma.room.delete({ where: { id } });
-
     return { message: 'Room deleted successfully' };
   }
 
   async joinRoom(userId: string, id: string): Promise<{ message: string }> {
     const room = await this.prisma.room.findUnique({ where: { id } });
     if (!room) throw new NotFoundException('Room not found');
-
     const existing = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId: id, userId } },
     });
     if (existing) return { message: 'Already a member' };
-
-    await this.prisma.roomMember.create({
-      data: { roomId: id, userId },
-    });
-
+    await this.prisma.roomMember.create({ data: { roomId: id, userId } });
     return { message: 'Joined room successfully' };
   }
 
   async leaveRoom(userId: string, id: string): Promise<{ message: string }> {
     const room = await this.prisma.room.findUnique({ where: { id } });
     if (!room) throw new NotFoundException('Room not found');
-
+    if (room.ownerId === userId) throw new ForbiddenException('Owner cannot leave. Transfer ownership or delete the room.');
     const membership = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId: id, userId } },
     });
-    if (!membership) throw new BadRequestException('Not a member');
-
-    if (room.ownerId === userId) {
-      throw new BadRequestException('Owner cannot leave. Transfer ownership or delete the room.');
-    }
-
+    if (!membership) throw new NotFoundException('Not a member');
     await this.prisma.roomMember.delete({ where: { id: membership.id } });
-
     return { message: 'Left room successfully' };
   }
 
-  async removeMember(
-    userId: string,
-    roomId: string,
-    targetUserId: string,
-  ): Promise<{ message: string }> {
+  async removeMember(userId: string, roomId: string, targetUserId: string): Promise<{ message: string }> {
     const room = await this.prisma.room.findUnique({ where: { id: roomId } });
     if (!room) throw new NotFoundException('Room not found');
     if (room.ownerId !== userId) throw new ForbiddenException('Only the room owner can remove members');
-
-    if (targetUserId === userId) throw new BadRequestException('Cannot remove yourself. Use leave instead.');
-
+    if (targetUserId === userId) throw new ForbiddenException('Cannot remove yourself. Use leave instead.');
     const membership = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId, userId: targetUserId } },
     });
     if (!membership) throw new NotFoundException('Member not found');
-
     await this.prisma.roomMember.delete({ where: { id: membership.id } });
-
     return { message: 'Member removed successfully' };
   }
 }

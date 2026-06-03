@@ -73,25 +73,22 @@ export class ContactsService {
     });
 
     // 5. Send real-time notification to target user via Patuih
-    if (currentUser.patuihApiKey) {
-      try {
-        await this.chatService.publishEvent(
-          userId,
-          `user_${targetUser.id}`,
-          'contact.invite',
-          {
-            id: contact.id,
-            sender: {
-              id: currentUser.id,
-              username: currentUser.username,
-              displayName: currentUser.displayName,
-              avatarUrl: currentUser.avatarUrl,
-            },
+    try {
+      await this.chatService.publishEvent(
+        `user_${targetUser.id}`,
+        'contact.invite',
+        {
+          id: contact.id,
+          sender: {
+            id: currentUser.id,
+            username: currentUser.username,
+            displayName: currentUser.displayName,
+            avatarUrl: currentUser.avatarUrl,
           },
-        );
-      } catch (err) {
-        // Log error but don't fail transaction
-      }
+        },
+      );
+    } catch (err) {
+      // Log error but don't fail transaction
     }
 
     return {
@@ -126,25 +123,22 @@ export class ContactsService {
     });
 
     // Notify sender that B accepted their invite
-    if (currentUser.patuihApiKey) {
-      try {
-        await this.chatService.publishEvent(
-          userId,
-          `user_${contact.senderId}`,
-          'contact.accepted',
-          {
-            id: contactId,
-            receiver: {
-              id: currentUser.id,
-              username: currentUser.username,
-              displayName: currentUser.displayName,
-              avatarUrl: currentUser.avatarUrl,
-            },
+    try {
+      await this.chatService.publishEvent(
+        `user_${contact.senderId}`,
+        'contact.accepted',
+        {
+          id: contactId,
+          receiver: {
+            id: currentUser.id,
+            username: currentUser.username,
+            displayName: currentUser.displayName,
+            avatarUrl: currentUser.avatarUrl,
           },
-        );
-      } catch (err) {
-        // ignore
-      }
+        },
+      );
+    } catch (err) {
+      // ignore
     }
 
     return { message: 'Invitation accepted successfully' };
@@ -171,10 +165,9 @@ export class ContactsService {
     const currentUser = await this.prisma.user.findUnique({
       where: { id: userId },
     });
-    if (currentUser && currentUser.patuihApiKey) {
+    if (currentUser) {
       try {
         await this.chatService.publishEvent(
-          userId,
           `user_${otherUserId}`,
           'contact.deleted',
           {

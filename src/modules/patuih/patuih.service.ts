@@ -1,11 +1,10 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Patuih } from 'patuih-sdk';
 import { io as SocketIoClient, Socket } from 'socket.io-client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { WsEventPayload } from './patuih.interface';
 
 interface PatuihInstance {
-  getCredits(): Promise<{ tenantId?: string }>;
   publish(
     channel: string,
     event: string,
@@ -13,10 +12,12 @@ interface PatuihInstance {
   ): Promise<void>;
 }
 
-function createPatuih(apiKey: string, baseUrl?: string): PatuihInstance {
+function createPatuih(): PatuihInstance {
+  const apiKey = process.env.PATUIH_SYSTEM_API_KEY ?? '';
   const config: Record<string, string> = { apiKey };
+  const baseUrl = process.env.PATUIH_URL;
   if (baseUrl) config.baseUrl = baseUrl;
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call
   const instance: PatuihInstance = new (Patuih as any)(config);
   return instance;
 }
@@ -24,42 +25,36 @@ function createPatuih(apiKey: string, baseUrl?: string): PatuihInstance {
 @Injectable()
 export class PatuihService {
   private readonly logger = new Logger(PatuihService.name);
-  private readonly patuihUrl: string | undefined;
   private sockets = new Map<string, Socket>();
 
   constructor(private eventEmitter: EventEmitter2) {
-    this.patuihUrl = process.env.PATUIH_URL || undefined;
-  }
-
-  private get baseUrl(): string {
-    return this.patuihUrl ?? 'https://patuih-services.lapeh.web.id';
-  }
-
-  async validateApiKey(apiKey: string): Promise<{ tenantId: string }> {
-    try {
-      const patuih = createPatuih(apiKey, this.patuihUrl);
-      const credits = await patuih.getCredits();
-      const tenantId = credits.tenantId ?? '';
-      if (!tenantId) {
-        throw new UnauthorizedException('Invalid Patuih API key');
-      }
-      return { tenantId };
-    } catch (err: unknown) {
-      this.logger.error(
-        `API key validation failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      throw new UnauthorizedException('Invalid Patuih API key');
+    const tenantId = process.env.PATUIH_SYSTEM_TENANT_ID;
+    if (tenantId) {
+      this.connectToGateway(tenantId);
     }
   }
 
+  private get baseUrl(): string {
+    return process.env.PATUIH_URL || 'https://patuih-services.lapeh.web.id';
+  }
+
   async publish(
-    apiKey: string,
     channel: string,
     event: string,
     data: Record<string, unknown>,
   ): Promise<void> {
-    const patuih = createPatuih(apiKey, this.patuihUrl);
+    const patuih = createPatuih();
     await patuih.publish(channel, event, data);
+  }
+
+  async getSystemTenantId(): Promise<string> {
+    const cached = process.env.PATUIH_SYSTEM_TENANT_ID;
+    if (cached) return cached;
+    const patuih = createPatuih();
+    const res = await (patuih as any).getCredits();
+    const tenantId = res?.data?.tenantId || res?.tenantId || '';
+    if (!tenantId) throw new Error('Failed to get tenant ID from Patuih');
+    return tenantId;
   }
 
   connectToGateway(tenantId: string): Socket {
