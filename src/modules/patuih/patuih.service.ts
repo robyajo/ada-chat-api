@@ -13,25 +13,31 @@ interface PatuihInstance {
   ): Promise<void>;
 }
 
-function createPatuih(apiKey: string, baseUrl: string): PatuihInstance {
+function createPatuih(apiKey: string, baseUrl?: string): PatuihInstance {
+  const config: Record<string, string> = { apiKey };
+  if (baseUrl) config.baseUrl = baseUrl;
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
-  const instance: PatuihInstance = new (Patuih as any)({ apiKey, baseUrl });
+  const instance: PatuihInstance = new (Patuih as any)(config);
   return instance;
 }
 
 @Injectable()
 export class PatuihService {
   private readonly logger = new Logger(PatuihService.name);
-  private readonly baseUrl: string;
+  private readonly patuihUrl: string | undefined;
   private sockets = new Map<string, Socket>();
 
   constructor(private eventEmitter: EventEmitter2) {
-    this.baseUrl = process.env.PATUIH_URL ?? 'http://localhost:8000';
+    this.patuihUrl = process.env.PATUIH_URL || undefined;
+  }
+
+  private get baseUrl(): string {
+    return this.patuihUrl ?? 'https://patuih-services.lapeh.web.id';
   }
 
   async validateApiKey(apiKey: string): Promise<{ tenantId: string }> {
     try {
-      const patuih = createPatuih(apiKey, this.baseUrl);
+      const patuih = createPatuih(apiKey, this.patuihUrl);
       const credits = await patuih.getCredits();
       const tenantId = credits.tenantId ?? '';
       if (!tenantId) {
@@ -52,7 +58,7 @@ export class PatuihService {
     event: string,
     data: Record<string, unknown>,
   ): Promise<void> {
-    const patuih = createPatuih(apiKey, this.baseUrl);
+    const patuih = createPatuih(apiKey, this.patuihUrl);
     await patuih.publish(channel, event, data);
   }
 

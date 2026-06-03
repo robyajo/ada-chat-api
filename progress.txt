@@ -8,3 +8,59 @@
 - Regenerated Prisma client
 - Updated `src/app.module.ts` — imported PatuihModule + ChatModule
 - Passed `npx nest build` and `npm run lint` (no new errors in our code)
+
+## [2026-06-03] Fix patuih-sdk ESM/CJS mismatch, nginx conf, CLIENT_URL, port log
+
+### Fix patuih-sdk ESM/CJS mismatch
+- Changed `patuih-sdk/tsconfig.json` — module: esnext -> commonjs, moduleResolution: bundler -> node
+- Changed `patuih-sdk/package.json` — removed type: module, added require export condition
+- Rebuilt SDK and copied dist + package.json to node_modules
+
+### Fix nginx.conf
+- Added missing upstream block (ada_chat_api -> 127.0.0.1:8800)
+- Added HTTP to HTTPS redirect server block (listen 80)
+- Fixed WebSocket upgrade headers (Connection upgrade for /socket.io/, $http_connection for /)
+- Added ssl_protocols + ssl_ciphers
+- Added keepalive 64 to upstream
+
+### Fix CLIENT_URL
+- Changed CLIENT_URL from http://localhost:8800 -> http://localhost:5173 in .env
+
+### Add port log
+- Added logger.log in src/main.ts to show running port on startup
+## [2026-06-03] Fix PatuihService — jangan override default URL SDK dengan localhost
+- patuih.service.ts: createPatuih() skrg pake aseUrl optional — klo gak di-set, SDK pake default https://patuih-services.lapeh.web.id
+- Hapus PATUIH_URL dari .env (gak perlu, SDK udah punya default)
+- 	his.baseUrl di constructor diganti getter yg fallback ke URL Patuih yg bener
+
+
+## [2026-06-03] Add PIN (BBM-like) — setiap user punya PIN 6 digit unik
+### Backend
+- prisma/models/users.prisma: tambah field pin String @unique
+- auth.service.ts: generateUniquePin() dipanggil pas register, googleLogin, discordLogin
+- auth.controller.ts: tambah endpoint GET /api/v1/auth/find-by-pin?pin=123456 (public)
+- auth.service.ts: tambah method findByPin() — return user by PIN
+- Generate PIN via SQL untuk user existing
+- prisma db push sync schema
+
+### Frontend
+- AuthUser interface: tambah pin: string
+- Lobby.tsx: tampilkan PIN user di Room Selection (PIN Anda box)
+- Lobby.tsx: tambah fitur Cari via PIN — input 6 digit + tombol cari
+- App.tsx: update /api/v1/auth/me type include pin
+
+## [2026-06-03] Add phone registration + OTP via SMS
+### Backend
+- prisma/models/users.prisma: tambah phone (String? @unique), phoneVerified, phoneVerifiedAt + metadata di VerificationToken
+- Installed twilio SDK
+- Created src/modules/sms/ — SmsModule + SmsService (Twilio, fallback log di dev)
+- auth.schema.ts: tambah RegisterPhoneSchema, VerifyOtpSchema
+- auth.controller.ts: tambah POST /api/v1/auth/register-phone, POST /api/v1/auth/verify-otp (public)
+- auth.service.ts: tambah registerPhone() (send OTP) + verifyOtp() (verif + create user)
+- app.module.ts: import SmsModule
+- .env: tambah TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER (opsional)
+
+### Frontend
+- Lobby.tsx: Register mode punya tab Email/Phone
+- Phone: input nomor + tombol Send OTP -> input OTP 6 digit -> Verify & Register
+- handlePhoneRegister() + handleVerifyOtp() handlers

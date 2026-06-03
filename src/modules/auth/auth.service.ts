@@ -12,8 +12,11 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'node:crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { SmsService } from '../sms/sms.service';
 import type {
   RegisterDto,
+  RegisterPhoneDto,
+  VerifyOtpDto,
   LoginDto,
   UpdateProfileDto,
 } from './schemas/auth.schema';
@@ -37,6 +40,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private mailService: MailService,
+    private smsService: SmsService,
     configService: ConfigService,
   ) {
     this.refreshTokenSecret =
@@ -63,11 +67,14 @@ export class AuthService {
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(dto.password, saltRounds);
 
+    const pin = await this.generateUniquePin();
+
     const user = await this.prisma.user.create({
       data: {
         username: dto.username,
         email: dto.email,
         passwordHash,
+        pin,
         displayName: dto.displayName ?? dto.username,
         provider: 'email',
       },
@@ -75,6 +82,89 @@ export class AuthService {
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
 
+    const { passwordHash: _, ...userWithoutPassword } = user;
+    return { user: userWithoutPassword, tokens };
+  }
+
+  private async generateUniquePin(): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const pin = String(Math.floor(100000 + Math.random() * 900000));
+      const existing = await this.prisma.user.findUnique({ where: { pin } });
+      if (!existing) return pin;
+    }
+    throw new Error('Failed to generate unique PIN');
+  }
+
+  async registerPhone(dto: RegisterPhoneDto): Promise<{ message: string }> {
+    const existing = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
+    if (existing) throw new ConflictException('Phone number already registered');
+
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+
+    await this.prisma.verificationToken.create({
+      data: {
+        token: otp,
+        userId: '__pending__',
+        type: 'PHONE_OTP',
+        expiresAt,
+        metadata: JSON.stringify({
+          phone: dto.phone,
+          passwordHash,
+          displayName: dto.displayName || null,
+        }),
+      },
+    });
+
+    await this.smsService.sendOtp(dto.phone, otp);
+    return { message: 'OTP sent to your phone' };
+  }
+
+  async verifyOtp(dto: VerifyOtpDto): Promise<AuthResponse> {
+    const record = await this.prisma.verificationToken.findUnique({
+      where: { token: dto.otp },
+    });
+
+    if (!record || record.type !== 'PHONE_OTP') {
+      throw new BadRequestException('Invalid or expired OTP');
+    }
+
+    if (record.expiresAt < new Date()) {
+      throw new BadRequestException('OTP has expired');
+    }
+
+    const data = JSON.parse(record.metadata || '{}') as {
+      phone: string;
+      passwordHash: string;
+      displayName: string | null;
+    };
+
+    if (data.phone !== dto.phone) {
+      throw new BadRequestException('OTP does not match this phone number');
+    }
+
+    const username = dto.username ?? `user_${dto.phone.slice(-6)}`;
+    const pin = await this.generateUniquePin();
+
+    const user = await this.prisma.user.create({
+      data: {
+        username,
+        email: `${dto.phone}@phone.local`,
+        passwordHash: data.passwordHash,
+        pin,
+        phone: dto.phone,
+        phoneVerified: true,
+        phoneVerifiedAt: new Date(),
+        displayName: data.displayName || username,
+        provider: 'phone',
+      },
+    });
+
+    await this.prisma.verificationToken.delete({ where: { id: record.id } });
+
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
     const { passwordHash: _, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, tokens };
   }
@@ -280,6 +370,15 @@ export class AuthService {
     return { message: 'Password changed successfully' };
   }
 
+  async findByPin(pin: string): Promise<{ id: string; username: string; displayName: string | null; pin: string; avatarUrl: string | null }> {
+    const user = await this.prisma.user.findUnique({
+      where: { pin },
+      select: { id: true, username: true, displayName: true, pin: true, avatarUrl: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
   async logout(refreshToken: string): Promise<void> {
     const tokenHash = this.hashToken(refreshToken);
     await this.prisma.refreshToken.deleteMany({ where: { tokenHash } });
@@ -375,11 +474,13 @@ export class AuthService {
         username = `${baseUsername}_${profile.googleId.slice(0, 6)}`;
       }
 
+      const googlePin = await this.generateUniquePin();
       user = await this.prisma.user.create({
         data: {
           googleId: profile.googleId,
           email: profile.email || `${profile.googleId}@google.local`,
           username,
+          pin: googlePin,
           displayName: profile.displayName || username,
           avatarUrl: profile.avatarUrl || null,
           emailVerified: !!profile.email,
@@ -457,11 +558,13 @@ export class AuthService {
         username = `${baseUsername}_${profile.discordId.slice(0, 6)}`;
       }
 
+      const discordPin = await this.generateUniquePin();
       user = await this.prisma.user.create({
         data: {
           discordId: profile.discordId,
           email: profile.email || `${profile.discordId}@discord.local`,
           username,
+          pin: discordPin,
           displayName: profile.globalName || profile.username,
           avatarUrl: profile.avatarUrl || null,
           emailVerified: !!profile.email,

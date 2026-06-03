@@ -3,6 +3,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { ConfigModule } from './config/config.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MailModule } from './modules/mail/mail.module';
+import { SmsModule } from './modules/sms/sms.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PatuihModule } from './modules/patuih/patuih.module';
 import { ChatModule } from './modules/chat/chat.module';
@@ -16,6 +17,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     ConfigModule,
     AuthModule,
     MailModule,
+    SmsModule,
     PrismaModule,
     PatuihModule,
     ChatModule,

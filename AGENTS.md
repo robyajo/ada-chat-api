@@ -56,8 +56,9 @@ prisma/
 | discordId       | String?  | unique                                    |
 | avatarUrl       | String?  |                                           |
 | provider        | String   | "email" / "google" / "discord"            |
-| patuihApiKey    | String?  | **(TBD)** API Key Patuih user             |
-| patuihTenantId  | String?  | **(TBD)** Tenant ID dari Patuih           |
+| pin             | String   | unique, 6 digit (BBM-like) — digenerate otomatis saat register |
+| patuihApiKey    | String?  | API Key Patuih user                       |
+| patuihTenantId  | String?  | Tenant ID dari Patuih                     |
 | emailVerified   | Boolean  |                                           |
 | role            | UserRole | USER / ADMIN                              |
 
@@ -89,11 +90,12 @@ Patuih Gateway → PatuihService (WS client) → EventEmitter → ChatGateway �
 
 ## Konsep Aplikasi
 
-1. **Registrasi:** User daftar via email/password atau Google OAuth
-2. **Setup API Key:** User wajib menambahkan Patuih API Key (divalidasi backend via `PatuihService.validateApiKey()`)
-3. **Penyimpanan:** API Key + tenantId disimpan di DB user (tidak pernah ke client)
-4. **Chat:** FE connect ke backend ChatGateway → backend publish ke Patuih Gateway via SDK
-5. **Riwayat:** Pesan disimpan di localStorage (client-side)
+1. **Registrasi:** User daftar via email/password atau Google OAuth. Setiap user otomatis dapet PIN 6 digit unik (BBM-like).
+2. **Cari User via PIN:** `GET /api/v1/auth/find-by-pin?pin=123456` — public endpoint cari user by PIN.
+3. **Setup API Key:** User wajib menambahkan Patuih API Key (divalidasi backend via `PatuihService.validateApiKey()`)
+4. **Penyimpanan:** API Key + tenantId disimpan di DB user (tidak pernah ke client)
+5. **Chat:** FE connect ke backend ChatGateway → backend publish ke Patuih Gateway via SDK
+6. **Riwayat:** Pesan disimpan di localStorage (client-side)
 
 > 📖 Baca konsep lengkap: `KONSEP.md`
 

@@ -23,6 +23,8 @@ import { AuthService } from './auth.service';
 
 import {
   RegisterSchema,
+  RegisterPhoneSchema,
+  VerifyOtpSchema,
   LoginSchema,
   RefreshTokenSchema,
   ForgotPasswordSchema,
@@ -32,6 +34,8 @@ import {
 } from './schemas/auth.schema';
 import type {
   RegisterDto,
+  RegisterPhoneDto,
+  VerifyOtpDto,
   LoginDto,
   RefreshTokenDto,
   ForgotPasswordDto,
@@ -130,6 +134,24 @@ export class AuthController {
   }
 
   @Public()
+  @Post('register-phone')
+  @HttpCode(HttpStatus.OK)
+  async registerPhone(
+    @Body(new ZodValidationPipe(RegisterPhoneSchema)) dto: RegisterPhoneDto,
+  ) {
+    return this.authService.registerPhone(dto);
+  }
+
+  @Public()
+  @Post('verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async verifyOtp(
+    @Body(new ZodValidationPipe(VerifyOtpSchema)) dto: VerifyOtpDto,
+  ) {
+    return this.authService.verifyOtp(dto);
+  }
+
+  @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -153,6 +175,13 @@ export class AuthController {
   @Get('me')
   async getProfile(@CurrentUser() user: JwtPayload) {
     return this.authService.getProfile(user.sub);
+  }
+
+  @Public()
+  @Get('find-by-pin')
+  async findByPin(@Query('pin') pin: string | undefined) {
+    if (!pin) throw new BadRequestException('PIN is required');
+    return this.authService.findByPin(pin);
   }
 
   @Post('send-verification')

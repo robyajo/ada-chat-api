@@ -19,6 +19,25 @@ export const RegisterSchema = z
     path: ['confirmPassword'],
   });
 
+export const RegisterPhoneSchema = z.object({
+  phone: z.string().regex(/^\+[1-9]\d{6,14}$/, 'Phone must be in international format (e.g. +628123456789)'),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password must not exceed 128 characters'),
+  confirmPassword: z.string(),
+  displayName: z.string().min(1).max(100).optional(),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword'],
+});
+
+export const VerifyOtpSchema = z.object({
+  phone: z.string().regex(/^\+[1-9]\d{6,14}$/),
+  otp: z.string().length(6, 'OTP must be 6 digits'),
+  username: z.string().min(3).max(50).optional(),
+});
+
 export const LoginSchema = z.object({
   username: z.string(),
   password: z.string(),
@@ -76,6 +95,8 @@ export const UpdateProfileSchema = z.object({
 });
 
 export type RegisterDto = z.infer<typeof RegisterSchema>;
+export type RegisterPhoneDto = z.infer<typeof RegisterPhoneSchema>;
+export type VerifyOtpDto = z.infer<typeof VerifyOtpSchema>;
 export type LoginDto = z.infer<typeof LoginSchema>;
 export type RefreshTokenDto = z.infer<typeof RefreshTokenSchema>;
 export type VerifyEmailDto = z.infer<typeof VerifyEmailSchema>;

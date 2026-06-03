@@ -22,6 +22,10 @@ async function bootstrap() {
     credentials: true,
   });
 
-  await app.listen(process.env.PORT ?? 3000);
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+
+  const logger = app.get(Logger);
+  logger.log(`Server running on http://localhost:${port}`, 'NestApplication');
 }
 bootstrap();

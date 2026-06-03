@@ -9,8 +9,12 @@ model User {
     discordId          String?             @unique
     avatarUrl          String?
     provider           String              @default("email")
+    phone              String?             @unique
+    phoneVerified      Boolean             @default(false)
+    phoneVerifiedAt    DateTime?
     emailVerified      Boolean             @default(false)
     emailVerifiedAt    DateTime?
+    pin                String              @unique
     patuihApiKey       String?
     patuihTenantId     String?
     role               UserRole            @default(USER)
@@ -75,6 +79,7 @@ model VerificationToken {
     type      String   @default("EMAIL_VERIFICATION")
     expiresAt DateTime
     createdAt DateTime @default(now())
+    metadata  String?
 
     user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
