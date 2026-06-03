@@ -26,6 +26,13 @@ model User {
     refreshTokens      RefreshToken[]
     verificationTokens VerificationToken[]
     loginLogs          LoginLog[]
+    ownedRooms         Room[]          @relation("RoomOwner")
+    roomMemberships    RoomMember[]
+    sentContacts       Contact[]       @relation("ContactSender")
+    receivedContacts   Contact[]       @relation("ContactReceiver")
+    moments            Moment[]        @relation("MomentAuthor")
+    momentLikes        MomentLike[]
+    momentComments     MomentComment[]
 }
 
 enum UserRole {
@@ -99,4 +106,33 @@ model LoginLog {
 
     @@index([userId])
     @@index([createdAt])
+}
+
+model Room {
+    id        String   @id @default(cuid())
+    name      String
+    roomId    String   @unique
+    avatarUrl String?
+    ownerId   String
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    owner   User         @relation("RoomOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+    members RoomMember[]
+
+    @@index([ownerId])
+}
+
+model RoomMember {
+    id        String   @id @default(cuid())
+    roomId    String
+    userId    String
+    role      String   @default("member")
+    joinedAt  DateTime @default(now())
+
+    room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+    member User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([roomId, userId])
+    @@index([userId])
 }

@@ -1,0 +1,42 @@
+model Moment {
+    id         String   @id @default(cuid())
+    authorId   String
+    content    String
+    background String
+    createdAt  DateTime @default(now())
+    updatedAt  DateTime @updatedAt
+
+    author   User            @relation("MomentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+    likes    MomentLike[]
+    comments MomentComment[]
+
+    @@index([authorId])
+}
+
+model MomentLike {
+    id        String   @id @default(cuid())
+    momentId  String
+    userId    String
+    createdAt DateTime @default(now())
+
+    moment Moment @relation(fields: [momentId], references: [id], onDelete: Cascade)
+    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([momentId, userId])
+    @@index([momentId])
+    @@index([userId])
+}
+
+model MomentComment {
+    id        String   @id @default(cuid())
+    momentId  String
+    authorId  String
+    content   String
+    createdAt DateTime @default(now())
+
+    moment Moment @relation(fields: [momentId], references: [id], onDelete: Cascade)
+    author User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+    @@index([momentId])
+    @@index([authorId])
+}

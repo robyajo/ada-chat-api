@@ -7,6 +7,8 @@ import { SmsModule } from './modules/sms/sms.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PatuihModule } from './modules/patuih/patuih.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { ContactsModule } from './modules/contacts/contacts.module';
+import { MomentsModule } from './modules/moments/moments.module';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -21,6 +23,8 @@ import { RolesGuard } from './common/guards/roles.guard';
     PrismaModule,
     PatuihModule,
     ChatModule,
+    ContactsModule,
+    MomentsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

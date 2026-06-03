@@ -30,6 +30,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly logger = new Logger(ChatGateway.name);
 
+  // Map of active userId -> username
+  public static onlineUsers = new Map<string, string>();
+
   constructor(
     private chatService: ChatService,
     private patuihService: PatuihService,
@@ -50,12 +53,62 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.username = username ?? 'Anonymous';
     client.tenantId = tenantId;
 
+    ChatGateway.onlineUsers.set(userId, client.username);
+
     this.patuihService.connectToGateway(tenantId);
+
+    // Auto join private notification room and global presence channel
+    void client.join(`user_${userId}`);
+    void client.join(`presence_${tenantId}`);
+
+    const cleanupUserEvents = this.chatService.onPatuihEvent(
+      `user_${userId}`,
+      (payload: WsEventPayload) => {
+        client.emit('notification', payload);
+      },
+    );
+
+    const cleanupPresenceEvents = this.chatService.onPatuihEvent(
+      `presence_${tenantId}`,
+      (payload: WsEventPayload) => {
+        client.emit('presence', payload);
+      },
+    );
+
+    (client as any).cleanupFns = [cleanupUserEvents, cleanupPresenceEvents];
+
+    // Notify other users online
+    void this.chatService.publishEvent(userId, `presence_${tenantId}`, 'presence.online', {
+      userId,
+      username: client.username,
+    }).catch(() => {});
 
     this.logger.log(`Client connected: ${userId} (${client.username})`);
   }
 
   handleDisconnect(client: AuthenticatedSocket) {
+    if (client.userId) {
+      ChatGateway.onlineUsers.delete(client.userId);
+
+      if (client.tenantId) {
+        void this.chatService.publishEvent(client.userId, `presence_${client.tenantId}`, 'presence.offline', {
+          userId: client.userId,
+          username: client.username,
+        }).catch(() => {});
+      }
+    }
+
+    // Cleanup personal / presence listeners
+    const cleanupFns = (client as any).cleanupFns;
+    if (cleanupFns && Array.isArray(cleanupFns)) {
+      cleanupFns.forEach((fn) => fn());
+    }
+
+    // Cleanup room listener if active
+    if ((client as any).roomCleanupFn) {
+      (client as any).roomCleanupFn();
+    }
+
     this.logger.log(`Client disconnected: ${client.userId}`);
   }
 
@@ -68,6 +121,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!roomId) {
       client.emit('error', 'roomId is required');
       return;
+    }
+
+    // Clean up previous room listener first
+    if ((client as any).roomCleanupFn) {
+      (client as any).roomCleanupFn();
+      (client as any).roomCleanupFn = null;
     }
 
     client.roomId = roomId;
@@ -93,9 +152,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       },
     );
 
-    client.on('disconnect', () => {
-      cleanup();
-    });
+    (client as any).roomCleanupFn = cleanup;
   }
 
   @SubscribeMessage('send-message')
@@ -144,6 +201,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleLeaveRoom(@ConnectedSocket() client: AuthenticatedSocket) {
     const roomId = client.roomId;
     const userId = client.userId;
+
+    if ((client as any).roomCleanupFn) {
+      (client as any).roomCleanupFn();
+      (client as any).roomCleanupFn = null;
+    }
 
     if (roomId && userId) {
       try {

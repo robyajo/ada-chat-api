@@ -64,3 +64,8 @@
 - Lobby.tsx: Register mode punya tab Email/Phone
 - Phone: input nomor + tombol Send OTP -> input OTP 6 digit -> Verify & Register
 - handlePhoneRegister() + handleVerifyOtp() handlers
+
+## [2026-06-03] Add Room management — Room + RoomMember models, full CRUD API
+- prisma/models/users.prisma: tambah model Room (name, roomId unique, avatarUrl, ownerId) + RoomMember (role, @unique roomId+userId)
+- chat.controller.ts: tambah endpoint rooms CRUD (create, list, get, update, delete, join, leave, remove member)
+- chat.service.ts: tambah method createRoom, listRooms, getRoom, updateRoom, deleteRoom, joinRoom, leaveRoom, removeMember
