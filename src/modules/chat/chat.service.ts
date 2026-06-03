@@ -24,12 +24,40 @@ export class ChatService {
     roomId: string,
     data: { text: string; id: string; sender: string; timestamp: string },
   ): Promise<void> {
-    return this.patuihService.publish(roomId, 'chat.message', {
+    await this.patuihService.publish(roomId, 'chat.message', {
       text: data.text,
       sender: data.sender,
       id: data.id,
       timestamp: data.timestamp,
+    }).catch(() => {});
+    // Persist to database
+    await this.prisma.message.create({
+      data: {
+        msgId: data.id,
+        roomId,
+        sender: data.sender,
+        text: data.text,
+        type: 'text',
+        createdAt: new Date(data.timestamp),
+      },
+    }).catch((err) => this.logger.error(`Failed to save message: ${err.message}`));
+  }
+
+  async getMessages(
+    roomId: string,
+    limit = 50,
+    before?: string,
+  ) {
+    const where: any = { roomId };
+    if (before) {
+      where.createdAt = { lt: new Date(before) };
+    }
+    const messages = await this.prisma.message.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
     });
+    return messages.reverse();
   }
 
   async publishEvent(

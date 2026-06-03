@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -58,6 +59,20 @@ export class ChatController {
       timestamp: dto.timestamp,
     });
     return { status: 'sent' };
+  }
+
+  @Get('messages/:roomId')
+  async getMessages(
+    @CurrentUser() user: JwtPayload,
+    @Param('roomId') roomId: string,
+    @Query('limit') limit?: string,
+    @Query('before') before?: string,
+  ) {
+    return this.chatService.getMessages(
+      roomId,
+      limit ? parseInt(limit, 10) : 50,
+      before,
+    );
   }
 
   // --- Room Management ---

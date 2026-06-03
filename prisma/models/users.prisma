@@ -28,6 +28,7 @@ model User {
     loginLogs          LoginLog[]
     ownedRooms         Room[]          @relation("RoomOwner")
     roomMemberships    RoomMember[]
+    notifications      Notification[]
     sentContacts       Contact[]       @relation("ContactSender")
     receivedContacts   Contact[]       @relation("ContactReceiver")
     moments            Moment[]        @relation("MomentAuthor")
@@ -135,4 +136,33 @@ model RoomMember {
 
     @@unique([roomId, userId])
     @@index([userId])
+}
+
+model Message {
+    id        String   @id @default(cuid())
+    msgId     String
+    roomId    String
+    sender    String
+    text      String
+    type      String   @default("text")
+    createdAt DateTime @default(now())
+
+    @@unique([msgId, roomId])
+    @@index([roomId, createdAt])
+}
+
+model Notification {
+    id        String   @id @default(cuid())
+    userId    String
+    type      String
+    title     String
+    body      String?
+    data      String?
+    read      Boolean  @default(false)
+    createdAt DateTime @default(now())
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId, read])
+    @@index([userId, createdAt])
 }

@@ -69,3 +69,8 @@
 - prisma/models/users.prisma: tambah model Room (name, roomId unique, avatarUrl, ownerId) + RoomMember (role, @unique roomId+userId)
 - chat.controller.ts: tambah endpoint rooms CRUD (create, list, get, update, delete, join, leave, remove member)
 - chat.service.ts: tambah method createRoom, listRooms, getRoom, updateRoom, deleteRoom, joinRoom, leaveRoom, removeMember
+
+## [2026-06-03] Database persistence — messages, notifications
+- prisma: tambah model Message, Notification
+- chat.service.ts: publishMessage() now saves to DB
+- chat.controller.ts: tambah GET /api/v1/chat/messages/:roomId (load history)
