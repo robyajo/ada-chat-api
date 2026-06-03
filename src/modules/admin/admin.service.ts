@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import * as os from 'node:os';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -9,6 +10,8 @@ const execAsync = promisify(exec);
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     private prisma: PrismaService,
     private patuihService: PatuihService,
@@ -165,15 +168,13 @@ export class AdminService {
   }
 
   async restartPm2() {
-    try {
-      const { stdout } = await execAsync('pm2 restart ada-chat-api');
-      const match = stdout.match(/\[PM2\]\s*(done|Process\s+successfully)/i);
-      if (match) {
-        return { success: true, message: 'ada-chat-api restarted successfully via PM2' };
+    exec('pm2 restart ada-chat-api', (err) => {
+      if (err) {
+        this.logger.error(`PM2 restart failed: ${err.message}`);
+      } else {
+        this.logger.log('PM2 restart executed successfully');
       }
-      return { success: true, message: 'Restart command executed', detail: stdout.trim() };
-    } catch (err: any) {
-      throw new InternalServerErrorException(`PM2 restart failed: ${err.message}`);
-    }
+    });
+    return { success: true, message: 'ada-chat-api is restarting via PM2...' };
   }
 }
