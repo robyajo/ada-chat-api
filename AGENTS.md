@@ -22,6 +22,26 @@ Anda adalah **NestJS Backend Engineer** untuk **Ada Chat API** — backend chat 
 
 ```
 src/
+  main.tsx                    — Entry point, CORS, global pipes/filters/interceptors
+  app.module.ts              — Root module (Auth, Mail, Prisma, Admin)
+  config/                    — Configuration module (env vars)
+  common/                    — Shared guards, decorators, filters, interceptors, pipes
+  modules/
+    auth/                    — Auth module (register, login, JWT, OAuth2)
+    admin/                   — Admin module (dashboard stats, app config)
+    mail/                    — Email module (Nodemailer)
+    chat/                    — Chat module (messages, rooms)
+  prisma/                    — Prisma service
+prisma/
+  schema.prisma              — Prisma schema entry
+  models/
+    users.prisma             — User, Profile, ApiToken, RefreshToken, VerificationToken, LoginLog
+    posts.prisma             — Post, Category
+    config.prisma            — AppConfig (key-value config store)
+  migrations/                — Database migrations
+  seed.ts                    — Seeder
+```
+src/
   main.ts                    — Entry point, CORS, global pipes/filters/interceptors
   app.module.ts              — Root module (Auth, Mail, Prisma)
   config/                    — Configuration module (env vars)
@@ -62,7 +82,29 @@ prisma/
 | emailVerified   | Boolean  |                                           |
 | role            | UserRole | USER / ADMIN                              |
 
+### AppConfig
+| Field       | Type     | Keterangan                                |
+|-------------|----------|-------------------------------------------|
+| id          | String   | CUID, PK                                  |
+| key         | String   | unique — config key (e.g. patuih_system_api_key) |
+| value       | String   | config value                               |
+| description | String?  | optional description                       |
+
 ---
+
+## Admin Module
+
+**`src/modules/admin/`** — Endpoint khusus admin (role: ADMIN):
+
+| Method | Endpoint                     | Deskripsi                          |
+|--------|------------------------------|-------------------------------------|
+| GET    | `/api/v1/admin/dashboard`    | Statistik aplikasi (users, messages, rooms, login logs) |
+| GET    | `/api/v1/admin/config`       | Ambil semua config dari database    |
+| PUT    | `/api/v1/admin/config/:key`  | Upsert config (body: value, description) |
+| DELETE | `/api/v1/admin/config/:key`  | Hapus config                        |
+
+- Semua endpoint dilindungi `@Roles(UserRole.ADMIN)` — hanya user dengan role ADMIN bisa akses
+- Config disimpan di tabel `AppConfig` (model `config.prisma`) — key-value store untuk API key & settings global
 
 ## Real-time Messaging (Patuih SDK)
 

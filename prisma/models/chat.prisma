@@ -1,0 +1,110 @@
+model Message {
+  id        String   @id @default(cuid())
+  msgId     String
+  roomId    String
+  sender    String
+  text      String
+  type      String   @default("text")
+  replyToId String?
+  editedAt  DateTime?
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@unique([msgId, roomId])
+  @@index([roomId, createdAt])
+
+  replyTo     Message?           @relation("MessageReply", fields: [replyToId], references: [id])
+  replies     Message[]          @relation("MessageReply")
+  statuses    MessageStatus[]
+  reactions   MessageReaction[]
+  attachments Attachment[]
+}
+
+model MessageStatus {
+  id        String   @id @default(cuid())
+  messageId String
+  roomId    String
+  userId    String
+  status    String   @default("sent")
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  messageId String
+  roomId    String
+  sender    String
+  fileName  String
+  fileSize  Int
+  mimeType  String
+  url       String
+  width     Int?
+  height    Int?
+  duration  Int?
+  createdAt DateTime @default(now())
+
+  @@index([messageId])
+  @@index([roomId])
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+model UserSetting {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  theme                String   @default("system")
+  language             String   @default("id")
+  notificationEnabled  Boolean  @default(true)
+  messagePreview       Boolean  @default(true)
+  readReceipt          Boolean  @default(true)
+  typingIndicator      Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RecentConversation {
+  id            String   @id @default(cuid())
+  userId        String
+  targetId      String
+  targetType    String
+  lastMessage   String?
+  lastActivity  DateTime @default(now())
+
+  @@unique([userId, targetId, targetType])
+  @@index([userId, lastActivity])
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserLastRoom {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  roomId    String
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

@@ -34,6 +34,10 @@ model User {
     moments            Moment[]        @relation("MomentAuthor")
     momentLikes        MomentLike[]
     momentComments     MomentComment[]
+    reactions          MessageReaction[]
+    settings           UserSetting?
+    recentConversations RecentConversation[]
+    lastRoom           UserLastRoom?
 }
 
 enum UserRole {
@@ -136,19 +140,6 @@ model RoomMember {
 
     @@unique([roomId, userId])
     @@index([userId])
-}
-
-model Message {
-    id        String   @id @default(cuid())
-    msgId     String
-    roomId    String
-    sender    String
-    text      String
-    type      String   @default("text")
-    createdAt DateTime @default(now())
-
-    @@unique([msgId, roomId])
-    @@index([roomId, createdAt])
 }
 
 model Notification {

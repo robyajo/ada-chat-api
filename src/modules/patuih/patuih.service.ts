@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Patuih } from 'patuih-sdk';
 import { io as SocketIoClient, Socket } from 'socket.io-client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaService } from '../../prisma/prisma.service';
 import type { WsEventPayload } from './patuih.interface';
 
 interface PatuihInstance {
@@ -12,26 +13,46 @@ interface PatuihInstance {
   ): Promise<void>;
 }
 
-function createPatuih(): PatuihInstance {
-  const apiKey = process.env.PATUIH_SYSTEM_API_KEY ?? '';
-  const config: Record<string, string> = { apiKey };
-  const baseUrl = process.env.PATUIH_URL;
-  if (baseUrl) config.baseUrl = baseUrl;
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-  const instance: PatuihInstance = new (Patuih as any)(config);
-  return instance;
-}
-
 @Injectable()
-export class PatuihService {
+export class PatuihService implements OnModuleInit {
   private readonly logger = new Logger(PatuihService.name);
   private sockets = new Map<string, Socket>();
+  private cachedApiKey: string | null = null;
+  private cachedTenantId: string | null = null;
 
-  constructor(private eventEmitter: EventEmitter2) {
-    const tenantId = process.env.PATUIH_SYSTEM_TENANT_ID;
-    if (tenantId) {
-      this.connectToGateway(tenantId);
+  constructor(
+    private eventEmitter: EventEmitter2,
+    private prisma: PrismaService,
+  ) {}
+
+  async onModuleInit() {
+    await this.loadConfig();
+    if (this.cachedTenantId) {
+      this.connectToGateway(this.cachedTenantId);
     }
+  }
+
+  private async loadConfig() {
+    try {
+      const [apiKeyRow, tenantIdRow] = await Promise.all([
+        this.prisma.appConfig.findUnique({ where: { key: 'patuih_system_api_key' } }),
+        this.prisma.appConfig.findUnique({ where: { key: 'patuih_system_tenant_id' } }),
+      ]);
+      this.cachedApiKey = apiKeyRow?.value || process.env.PATUIH_SYSTEM_API_KEY || '';
+      this.cachedTenantId = tenantIdRow?.value || process.env.PATUIH_SYSTEM_TENANT_ID || null;
+    } catch {
+      this.cachedApiKey = process.env.PATUIH_SYSTEM_API_KEY || '';
+      this.cachedTenantId = process.env.PATUIH_SYSTEM_TENANT_ID || null;
+    }
+  }
+
+  private createPatuih(): PatuihInstance {
+    const apiKey = this.cachedApiKey ?? '';
+    const config: Record<string, string> = { apiKey };
+    const baseUrl = process.env.PATUIH_URL;
+    if (baseUrl) config.baseUrl = baseUrl;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return new (Patuih as any)(config);
   }
 
   private get baseUrl(): string {
@@ -43,17 +64,17 @@ export class PatuihService {
     event: string,
     data: Record<string, unknown>,
   ): Promise<void> {
-    const patuih = createPatuih();
+    const patuih = this.createPatuih();
     await patuih.publish(channel, event, data);
   }
 
   async getSystemTenantId(): Promise<string> {
-    const cached = process.env.PATUIH_SYSTEM_TENANT_ID;
-    if (cached) return cached;
-    const patuih = createPatuih();
+    if (this.cachedTenantId) return this.cachedTenantId;
+    const patuih = this.createPatuih();
     const res = await (patuih as any).getCredits();
     const tenantId = res?.data?.tenantId || res?.tenantId || '';
     if (!tenantId) throw new Error('Failed to get tenant ID from Patuih');
+    this.cachedTenantId = tenantId;
     return tenantId;
   }
 
@@ -98,5 +119,21 @@ export class PatuihService {
       socket.disconnect();
       this.sockets.delete(tenantId);
     }
+  }
+
+  getGatewayStatus(): {
+    connected: boolean;
+    tenants: string[];
+    tenantCount: number;
+  } {
+    const tenants: string[] = [];
+    for (const [tenantId, socket] of this.sockets.entries()) {
+      if (socket.connected) tenants.push(tenantId);
+    }
+    return {
+      connected: tenants.length > 0,
+      tenants,
+      tenantCount: tenants.length,
+    };
   }
 }

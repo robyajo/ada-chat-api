@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import { ChatService } from './chat.service';
+import { RedisService } from '../redis/redis.service';
 import { PatuihService } from '../patuih/patuih.service';
 import type { WsEventPayload } from '../patuih/patuih.interface';
 
@@ -37,28 +38,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly logger = new Logger(ChatGateway.name);
 
-  // Map of active userId -> username
   public static onlineUsers = new Map<string, string>();
 
   constructor(
     private chatService: ChatService,
+    private redisService: RedisService,
     private patuihService: PatuihService,
   ) {}
 
-  handleConnection(client: AuthenticatedSocket) {
+  async handleConnection(client: AuthenticatedSocket) {
     const userId = client.handshake.auth?.userId as string | undefined;
     const username = client.handshake.auth?.username as string | undefined;
     let tenantId = client.handshake.auth?.tenantId as string | undefined;
 
     if (!userId) {
-      client.emit('error', 'Authentication required: userId');
+      client.emit('error', { message: 'Authentication required: userId' });
       client.disconnect();
       return;
     }
 
-    const systemTenantId = process.env.PATUIH_SYSTEM_TENANT_ID || 'cmpxddhhl00fwv0dglc8uw6jx';
-    if (!tenantId || tenantId === 'system' || tenantId === 'null' || tenantId === 'undefined') {
-      tenantId = systemTenantId;
+    if (
+      !tenantId ||
+      tenantId === 'system' ||
+      tenantId === 'null' ||
+      tenantId === 'undefined'
+    ) {
+      tenantId = 'system';
     }
 
     client.userId = userId;
@@ -67,10 +72,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     ChatGateway.onlineUsers.set(userId, client.username);
 
-    // Connect to the system gateway
+    // Redis: online + socket mapping
+    await this.redisService.setOnline(userId, client.id).catch(() => {});
+    await this.redisService.mapSocket(userId, client.id).catch(() => {});
+    await this.redisService.mapUserToSocket(client.id, userId).catch(() => {});
+
+    const systemTenantId = await this.patuihService.getSystemTenantId();
     this.patuihService.connectToGateway(systemTenantId);
 
-    // Auto join private notification room and global presence channel
     void client.join(`user_${userId}`);
     void client.join(`presence_${systemTenantId}`);
 
@@ -90,7 +99,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     (client as any).cleanupFns = [cleanupUserEvents, cleanupPresenceEvents];
 
-    // Notify other users online on the system channel
     void this.chatService
       .publishEvent(`presence_${systemTenantId}`, 'presence.online', {
         userId,
@@ -101,30 +109,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(`Client connected: ${userId} (${client.username})`);
   }
 
-  handleDisconnect(client: AuthenticatedSocket) {
+  async handleDisconnect(client: AuthenticatedSocket) {
     if (client.userId) {
       ChatGateway.onlineUsers.delete(client.userId);
 
-      const systemTenantId = process.env.PATUIH_SYSTEM_TENANT_ID || 'cmpxddhhl00fwv0dglc8uw6jx';
+      await this.redisService.setOffline(client.userId).catch(() => {});
+      await this.redisService.setLastSeen(client.userId).catch(() => {});
+      await this.redisService.removeSocket(client.id).catch(() => {});
+
+      const systemTenantId = await this.patuihService.getSystemTenantId();
       void this.chatService
-        .publishEvent(
-          `presence_${systemTenantId}`,
-          'presence.offline',
-          {
-            userId: client.userId,
-            username: client.username,
-          },
-        )
+        .publishEvent(`presence_${systemTenantId}`, 'presence.offline', {
+          userId: client.userId,
+          username: client.username,
+        })
         .catch(() => {});
     }
 
-    // Cleanup personal / presence listeners
     const cleanupFns = (client as any).cleanupFns;
     if (cleanupFns && Array.isArray(cleanupFns)) {
-      cleanupFns.forEach((fn) => fn());
+      cleanupFns.forEach((fn: () => void) => fn());
     }
 
-    // Cleanup room listener if active
     if ((client as any).roomCleanupFn) {
       (client as any).roomCleanupFn();
     }
@@ -133,17 +139,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('join-room')
-  handleJoinRoom(
+  async handleJoinRoom(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { roomId: string; username: string },
   ) {
     const { roomId, username } = data;
     if (!roomId) {
-      client.emit('error', 'roomId is required');
+      client.emit('error', { message: 'roomId is required' });
       return;
     }
 
-    // Clean up previous room listener first
     if ((client as any).roomCleanupFn) {
       (client as any).roomCleanupFn();
       (client as any).roomCleanupFn = null;
@@ -153,9 +158,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     void client.join(roomId);
     client.username = username ?? client.username;
 
-    this.logger.log(`${client.username} joined room ${roomId}`);
+    await this.chatService.setLastRoom(client.userId!, roomId).catch(() => {});
 
-    const userId = client.userId!;
+    this.logger.log(`${client.username} joined room ${roomId}`);
 
     void this.chatService
       .publishEvent(roomId, 'chat.join', {
@@ -179,13 +184,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleSendMessage(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody()
-    data: { text: string; id: string; sender: string; timestamp: string },
+    data: {
+      text: string;
+      id: string;
+      sender: string;
+      timestamp: string;
+      type?: string;
+      replyToId?: string;
+    },
   ) {
     const roomId = client.roomId;
     const userId = client.userId;
 
     if (!roomId || !userId) {
-      client.emit('error', 'Join a room first');
+      client.emit('error', { message: 'Join a room first' });
       return;
     }
 
@@ -193,7 +205,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.chatService.publishMessage(roomId, data);
     } catch (err) {
       this.logger.error(`Failed to send message: ${err}`);
-      client.emit('error', 'Failed to send message');
+      client.emit('error', { message: 'Failed to send message' });
     }
   }
 
@@ -208,12 +220,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!roomId || !userId) return;
 
     try {
+      if (data.isTyping) {
+        await this.redisService.setTyping(roomId, userId, client.username!);
+      } else {
+        await this.redisService.clearTyping(roomId, userId);
+      }
+
       await this.chatService.publishEvent(roomId, 'chat.typing', {
         username: client.username,
         isTyping: data.isTyping,
       });
     } catch {
-      // silently fail for typing events
+      // silently fail
     }
   }
 
@@ -240,6 +258,91 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (roomId) {
       void client.leave(roomId);
       client.roomId = undefined;
+    }
+  }
+
+  // ── New WS Events ──
+
+  @SubscribeMessage('message-delivered')
+  async handleMessageDelivered(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { msgId: string },
+  ) {
+    if (!client.userId || !data.msgId) return;
+    await this.chatService.markDelivered(data.msgId, client.userId);
+
+    this.server
+      .to(client.roomId!)
+      .emit('event', {
+        channel: client.roomId,
+        event: 'message.delivered',
+        data: { msgId: data.msgId, userId: client.userId },
+        timestamp: new Date().toISOString(),
+      } as any);
+  }
+
+  @SubscribeMessage('message-read')
+  async handleMessageRead(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { msgId: string },
+  ) {
+    if (!client.userId || !data.msgId) return;
+    await this.chatService.markRead(data.msgId, client.userId);
+
+    this.server
+      .to(client.roomId!)
+      .emit('event', {
+        channel: client.roomId,
+        event: 'message.read',
+        data: { msgId: data.msgId, userId: client.userId },
+        timestamp: new Date().toISOString(),
+      } as any);
+  }
+
+  @SubscribeMessage('message-edit')
+  async handleMessageEdit(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { msgId: string; text: string },
+  ) {
+    if (!client.userId || !data.msgId) return;
+    try {
+      await this.chatService.editMessage(client.userId, data.msgId, data.text);
+    } catch (err: any) {
+      client.emit('error', { message: err.message });
+    }
+  }
+
+  @SubscribeMessage('message-delete')
+  async handleMessageDelete(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { msgId: string; mode?: 'soft' | 'hard' },
+  ) {
+    if (!client.userId || !data.msgId) return;
+    try {
+      await this.chatService.deleteMessage(
+        client.userId,
+        data.msgId,
+        data.mode || 'soft',
+      );
+    } catch (err: any) {
+      client.emit('error', { message: err.message });
+    }
+  }
+
+  @SubscribeMessage('message-reaction')
+  async handleMessageReaction(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { msgId: string; emoji: string },
+  ) {
+    if (!client.userId || !data.msgId) return;
+    try {
+      await this.chatService.toggleReaction(
+        client.userId,
+        data.msgId,
+        data.emoji,
+      );
+    } catch (err: any) {
+      client.emit('error', { message: err.message });
     }
   }
 }
