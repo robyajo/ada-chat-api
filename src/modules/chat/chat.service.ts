@@ -38,54 +38,70 @@ export class ChatService {
   ): Promise<void> {
     const msgType = data.type || 'text';
 
-    await this.patuihService
-      .publish(roomId, 'chat.message', {
-        text: data.text,
-        sender: data.sender,
-        id: data.id,
-        timestamp: data.timestamp,
-        type: msgType,
-        replyToId: data.replyToId || null,
-      })
-      .catch(() => {});
-
-    const msg = await this.prisma.message
-      .create({
-        data: {
-          msgId: data.id,
-          roomId,
-          sender: data.sender,
+    try {
+      await this.patuihService
+        .publish(roomId, 'chat.message', {
           text: data.text,
+          sender: data.sender,
+          id: data.id,
+          timestamp: data.timestamp,
           type: msgType,
           replyToId: data.replyToId || null,
-          createdAt: new Date(data.timestamp),
-        },
-      })
-      .catch((err) => {
-        this.logger.error(`Failed to save message: ${err.message}`);
-        return null;
-      });
+        })
+        .catch(() => {});
+    } catch {
+      // Silently ignore Patuih publish errors
+    }
 
-    if (msg) {
-      await this.trackRecentConversation(data.sender, roomId, 'room', data.text);
+    try {
+      const msg = await this.prisma.message
+        .create({
+          data: {
+            msgId: data.id,
+            roomId,
+            sender: data.sender,
+            text: data.text,
+            type: msgType,
+            replyToId: data.replyToId || null,
+            createdAt: new Date(data.timestamp),
+          },
+        })
+        .catch((err) => {
+          this.logger.error(`Failed to save message: ${err.message}`);
+          return null;
+        });
 
-      const roomMembers = await this.prisma.roomMember.findMany({
-        where: { roomId },
-        select: { userId: true },
-      });
+      if (msg) {
+        try {
+          await this.trackRecentConversation(data.sender, roomId, 'room', data.text);
+        } catch {
+          // Silently ignore tracking error
+        }
 
-      for (const member of roomMembers) {
-        if (member.userId !== data.sender) {
-          await this.prisma.messageStatus.create({
-            data: {
-              messageId: msg!.id,
-              roomId,
-              userId: member.userId,
-              status: 'sent',
-            },
-          }).catch(() => {});
+        try {
+          const roomMembers = await this.prisma.roomMember.findMany({
+            where: { roomId },
+            select: { userId: true },
+          });
+
+          for (const member of roomMembers) {
+            if (member.userId !== data.sender) {
+              await this.prisma.messageStatus.create({
+                data: {
+                  messageId: msg.id,
+                  roomId,
+                  userId: member.userId,
+                  status: 'sent',
+                },
+              }).catch(() => {});
+            }
+          }
+        } catch {
+          // Silently ignore status creation errors
         }
       }
+    } catch {
+      // Silently ignore all errors - message already published via Patuih
     }
   }
 
